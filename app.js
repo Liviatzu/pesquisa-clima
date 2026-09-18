@@ -1,0 +1,585 @@
+import { firebaseConfig } from './firebase-config.js';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import {
+  getFirestore, collection, doc, addDoc, updateDoc, onSnapshot,
+  query, orderBy, serverTimestamp, getDoc, getDocs, increment,
+} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { NIVEIS, TIPO_LABEL, montarModelo, novaPergunta, SEGMENTOS_PADRAO } from './questions.js';
+import { parseResposta, reconhecimentoDisponivel, criarReconhecedor } from './voice.js';
+
+const configPendente = firebaseConfig.apiKey === 'COLE_AQUI';
+let db = null;
+if (!configPendente) {
+  const fbApp = initializeApp(firebaseConfig);
+  db = getFirestore(fbApp);
+}
+
+// ---------- helpers de UI ----------
+const $ = (id) => document.getElementById(id);
+const telas = ['tela-config-aviso', 'tela-lista', 'tela-nova', 'tela-coleta', 'tela-relatorio'];
+
+function mostrarTela(id) {
+  telas.forEach((t) => $(t).classList.toggle('hidden', t !== id));
+  $('btn-voltar').hidden = id === 'tela-lista' || id === 'tela-config-aviso';
+}
+
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.add('hidden'), 2600);
+}
+
+function formatarData(ts) {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function formatarNumero(n, casas = 1) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  return n.toFixed(casas).replace('.', ',');
+}
+
+// ---------- router ----------
+window.addEventListener('hashchange', rotear);
+window.addEventListener('DOMContentLoaded', () => {
+  if (configPendente) { mostrarTela('tela-config-aviso'); return; }
+  rotear();
+});
+
+$('btn-voltar').addEventListener('click', () => {
+  pararEscuta();
+  location.hash = '#/';
+});
+
+function rotear() {
+  if (configPendente) { mostrarTela('tela-config-aviso'); return; }
+  const hash = location.hash.replace(/^#\/?/, '');
+  const [rota, param] = hash.split('/');
+  pararEscuta();
+  if (rota === 'nova') return telaNova();
+  if (rota === 'coleta' && param) return telaColeta(param);
+  if (rota === 'relatorio' && param) return telaRelatorio(param);
+  return telaLista();
+}
+
+// ---------- tela: lista ----------
+$('btn-nova-pesquisa').addEventListener('click', () => { location.hash = '#/nova'; });
+
+async function telaLista() {
+  $('topbar-title').textContent = 'Pesquisa de Clima';
+  $('topbar-subtitle').textContent = 'Falcioni Consultoria';
+  mostrarTela('tela-lista');
+  const cont = $('lista-pesquisas');
+  cont.innerHTML = '<p class="texto-vazio">Carregando...</p>';
+  let snap;
+  try {
+    snap = await getDocs(query(collection(db, 'sessions'), orderBy('criadoEm', 'desc')));
+  } catch (e) {
+    cont.innerHTML = '';
+    toast('Não foi possível carregar as pesquisas. Verifique a conexão ou a configuração do Firebase.');
+    return;
+  }
+  cont.innerHTML = '';
+  if (snap.empty) { $('lista-vazia').classList.remove('hidden'); return; }
+  $('lista-vazia').classList.add('hidden');
+  snap.forEach((docSnap) => {
+    const s = docSnap.data();
+    const item = document.createElement('div');
+    item.className = 'pesquisa-item';
+    item.innerHTML = `
+      <div class="pesquisa-item-info">
+        <div class="pesquisa-item-nome">${escapeHtml(s.clienteNome || 'Sem nome')}</div>
+        <div class="pesquisa-item-meta">${formatarData(s.criadoEm)} · ${(s.perguntas || []).length} perguntas</div>
+      </div>
+      <span class="badge-status ${s.status === 'aberta' ? 'badge-aberta' : 'badge-encerrada'}">${s.status === 'aberta' ? 'Em coleta' : 'Encerrada'}</span>
+    `;
+    item.addEventListener('click', () => {
+      location.hash = s.status === 'aberta' ? `#/coleta/${docSnap.id}` : `#/relatorio/${docSnap.id}`;
+    });
+    cont.appendChild(item);
+  });
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---------- tela: nova pesquisa ----------
+let perguntasEdit = [];
+
+function telaNova() {
+  $('topbar-title').textContent = 'Nova pesquisa';
+  $('topbar-subtitle').textContent = 'Falcioni Consultoria';
+  mostrarTela('tela-nova');
+  $('input-cliente').value = '';
+  $('input-segmentos').value = SEGMENTOS_PADRAO.join(', ');
+  perguntasEdit = montarModelo('nota10');
+  document.querySelectorAll('.modelo-opcao').forEach((b) => b.classList.toggle('selecionada', b.dataset.modelo === 'nota10'));
+  renderPerguntasEdit();
+}
+
+document.querySelectorAll('.modelo-opcao').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.modelo-opcao').forEach((b) => b.classList.remove('selecionada'));
+    btn.classList.add('selecionada');
+    perguntasEdit = montarModelo(btn.dataset.modelo);
+    renderPerguntasEdit();
+  });
+});
+
+$('btn-add-pergunta').addEventListener('click', () => {
+  perguntasEdit.push(novaPergunta('nota10'));
+  renderPerguntasEdit();
+});
+
+function renderPerguntasEdit() {
+  const cont = $('lista-perguntas-edit');
+  cont.innerHTML = '';
+  perguntasEdit.forEach((p, idx) => {
+    const item = document.createElement('div');
+    item.className = 'pergunta-edit-item';
+    item.innerHTML = `
+      <div class="pergunta-edit-topo">
+        <div class="pergunta-edit-reorder">
+          <button type="button" data-acao="up" ${idx === 0 ? 'disabled' : ''}>↑</button>
+          <button type="button" data-acao="down" ${idx === perguntasEdit.length - 1 ? 'disabled' : ''}>↓</button>
+        </div>
+        <select data-acao="tipo">
+          ${Object.entries(TIPO_LABEL).map(([v, l]) => `<option value="${v}" ${p.tipo === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+        <button type="button" class="pergunta-edit-remover" data-acao="remover" title="Remover">✕</button>
+      </div>
+      <textarea rows="2" data-acao="texto" placeholder="Digite a pergunta...">${escapeHtml(p.texto)}</textarea>
+    `;
+    item.querySelector('[data-acao="texto"]').addEventListener('input', (e) => { p.texto = e.target.value; });
+    item.querySelector('[data-acao="tipo"]').addEventListener('change', (e) => { p.tipo = e.target.value; });
+    item.querySelector('[data-acao="remover"]').addEventListener('click', () => {
+      perguntasEdit.splice(idx, 1); renderPerguntasEdit();
+    });
+    item.querySelector('[data-acao="up"]')?.addEventListener('click', () => {
+      [perguntasEdit[idx - 1], perguntasEdit[idx]] = [perguntasEdit[idx], perguntasEdit[idx - 1]];
+      renderPerguntasEdit();
+    });
+    item.querySelector('[data-acao="down"]')?.addEventListener('click', () => {
+      [perguntasEdit[idx + 1], perguntasEdit[idx]] = [perguntasEdit[idx], perguntasEdit[idx + 1]];
+      renderPerguntasEdit();
+    });
+    cont.appendChild(item);
+  });
+}
+
+$('btn-criar-pesquisa').addEventListener('click', async () => {
+  const clienteNome = $('input-cliente').value.trim();
+  if (!clienteNome) { toast('Informe o nome do cliente.'); return; }
+  const perguntasValidas = perguntasEdit.filter((p) => p.texto.trim());
+  if (!perguntasValidas.length) { toast('Adicione ao menos uma pergunta.'); return; }
+  const segmentos = $('input-segmentos').value.split(',').map((s) => s.trim()).filter(Boolean);
+
+  const btn = $('btn-criar-pesquisa');
+  btn.disabled = true; btn.textContent = 'Criando...';
+  try {
+    const ref = await addDoc(collection(db, 'sessions'), {
+      clienteNome,
+      status: 'aberta',
+      perguntas: perguntasValidas,
+      segmentos,
+      proximoSeq: 1,
+      criadoEm: serverTimestamp(),
+    });
+    location.hash = `#/coleta/${ref.id}`;
+  } catch (e) {
+    toast('Erro ao criar pesquisa: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Criar pesquisa e começar a coletar';
+  }
+});
+
+// ---------- tela: coleta ----------
+const coleta = {
+  sessionId: null,
+  session: null,
+  respondenteRef: null,
+  seq: 1,
+  segmento: null,
+  indicePergunta: 0,
+  reconhecedor: null,
+  ouvindo: false,
+  valorAtual: null,
+};
+
+async function telaColeta(sessionId) {
+  mostrarTela('tela-coleta');
+  const sessRef = doc(db, 'sessions', sessionId);
+  let snap;
+  try {
+    snap = await getDoc(sessRef);
+  } catch (e) {
+    toast('Sem conexão com o Firebase. Verifique a internet e tente novamente.');
+    location.hash = '#/'; return;
+  }
+  if (!snap.exists()) { toast('Pesquisa não encontrada.'); location.hash = '#/'; return; }
+  coleta.sessionId = sessionId;
+  coleta.session = snap.data();
+  $('topbar-title').textContent = coleta.session.clienteNome;
+  $('topbar-subtitle').textContent = 'Coletando respostas';
+  coleta.seq = coleta.session.proximoSeq || 1;
+  iniciarNovoRespondente();
+}
+
+$('btn-encerrar-pesquisa').addEventListener('click', async () => {
+  if (!confirm('Encerrar esta pesquisa? Você ainda poderá ver o relatório depois.')) return;
+  try {
+    await updateDoc(doc(db, 'sessions', coleta.sessionId), { status: 'encerrada', encerradoEm: serverTimestamp() });
+  } catch (e) {
+    toast('Sem conexão — tente encerrar novamente em instantes.');
+    return;
+  }
+  location.hash = `#/relatorio/${coleta.sessionId}`;
+});
+
+async function iniciarNovoRespondente() {
+  pararEscuta();
+  coleta.indicePergunta = 0;
+  coleta.segmento = null;
+  $('coleta-respondente-label').textContent = `Respondente ${coleta.seq}`;
+  const segmentos = coleta.session.segmentos || [];
+
+  let ref;
+  try {
+    ref = await addDoc(collection(db, 'sessions', coleta.sessionId, 'respondentes'), {
+      seq: coleta.seq,
+      segmento: null,
+      respostas: {},
+      abertas: {},
+      criadoEm: serverTimestamp(),
+      finalizadoEm: null,
+    });
+    await updateDoc(doc(db, 'sessions', coleta.sessionId), { proximoSeq: increment(1) });
+  } catch (e) {
+    toast('Sem conexão com o Firebase. Verifique a internet e toque para tentar novamente.');
+    $('bloco-pergunta').classList.add('hidden');
+    $('bloco-segmento').classList.add('hidden');
+    return;
+  }
+  coleta.respondenteRef = ref;
+  coleta.session.proximoSeq = coleta.seq + 1;
+
+  if (segmentos.length) {
+    mostrarBlocoSegmento(segmentos);
+  } else {
+    mostrarPergunta();
+  }
+}
+
+function mostrarBlocoSegmento(segmentos) {
+  $('bloco-pergunta').classList.add('hidden');
+  $('bloco-segmento').classList.remove('hidden');
+  const cont = $('chips-segmento');
+  cont.innerHTML = '';
+  segmentos.forEach((seg) => {
+    const chip = document.createElement('button');
+    chip.className = 'chip';
+    chip.textContent = seg;
+    chip.addEventListener('click', async () => {
+      coleta.segmento = seg;
+      try { await updateDoc(coleta.respondenteRef, { segmento: seg }); } catch (e) { /* segue mesmo assim, tenta de novo nas próximas respostas */ }
+      mostrarPergunta();
+    });
+    cont.appendChild(chip);
+  });
+}
+
+$('btn-pular-segmento').addEventListener('click', () => mostrarPergunta());
+
+function mostrarPergunta() {
+  pararEscuta();
+  $('bloco-segmento').classList.add('hidden');
+  $('bloco-pergunta').classList.remove('hidden');
+  const perguntas = coleta.session.perguntas;
+  const p = perguntas[coleta.indicePergunta];
+  coleta.valorAtual = null;
+
+  $('pergunta-indice').textContent = `Pergunta ${coleta.indicePergunta + 1} de ${perguntas.length}`;
+  $('pergunta-tipo-badge').textContent = TIPO_LABEL[p.tipo];
+  $('pergunta-texto').textContent = p.texto;
+  $('progresso-fill').style.width = `${Math.round((coleta.indicePergunta / perguntas.length) * 100)}%`;
+  $('transcricao-texto').value = '';
+
+  $('resposta-nota10').classList.add('hidden');
+  $('resposta-likert').classList.add('hidden');
+  $('resposta-aberta-aviso').classList.add('hidden');
+
+  if (p.tipo === 'nota10') {
+    renderRespostaNota10();
+  } else if (p.tipo === 'aberta') {
+    $('resposta-aberta-aviso').classList.remove('hidden');
+  } else {
+    renderRespostaLikert(p.tipo);
+  }
+
+  $('voz-nao-suportada').classList.toggle('hidden', reconhecimentoDisponivel());
+  $('btn-mic').disabled = !reconhecimentoDisponivel();
+  $('mic-status').textContent = 'Toque no microfone e deixe o cliente responder';
+}
+
+function renderRespostaNota10() {
+  const cont = $('resposta-nota10');
+  cont.classList.remove('hidden');
+  cont.innerHTML = '';
+  for (let n = 0; n <= 10; n++) {
+    const b = document.createElement('button');
+    b.className = 'nota-btn';
+    b.textContent = n;
+    b.addEventListener('click', () => selecionarValor(n));
+    cont.appendChild(b);
+  }
+}
+
+function renderRespostaLikert(tipo) {
+  const cont = $('resposta-likert');
+  cont.classList.remove('hidden');
+  cont.innerHTML = '';
+  NIVEIS[tipo].forEach((label, idx) => {
+    const valor = idx + 1;
+    const b = document.createElement('button');
+    b.className = 'likert-btn';
+    b.textContent = label;
+    b.addEventListener('click', () => selecionarValor(valor));
+    cont.appendChild(b);
+  });
+}
+
+function selecionarValor(valor) {
+  coleta.valorAtual = valor;
+  document.querySelectorAll('#resposta-nota10 .nota-btn').forEach((b, i) => b.classList.toggle('selecionado', i === valor));
+  document.querySelectorAll('#resposta-likert .likert-btn').forEach((b, i) => b.classList.toggle('selecionado', i === valor - 1));
+}
+
+// microfone
+function pararEscuta() {
+  if (coleta.reconhecedor && coleta.ouvindo) coleta.reconhecedor.stop();
+  coleta.ouvindo = false;
+  $('btn-mic')?.classList.remove('ouvindo');
+}
+
+$('btn-mic').addEventListener('click', () => {
+  if (!reconhecimentoDisponivel()) return;
+  if (coleta.ouvindo) { pararEscuta(); return; }
+
+  const perguntas = coleta.session.perguntas;
+  const p = perguntas[coleta.indicePergunta];
+
+  if (!coleta.reconhecedor) {
+    coleta.reconhecedor = criarReconhecedor({
+      onTranscricao: ({ completo }) => {
+        $('transcricao-texto').value = completo;
+        if (p.tipo !== 'aberta') {
+          const valor = parseResposta(completo, p.tipo);
+          if (valor !== null) selecionarValor(valor);
+        }
+      },
+      onErro: (err) => {
+        $('mic-status').textContent = err === 'no-speech' ? 'Não ouvi nada, tente novamente.' : `Erro no microfone (${err})`;
+        pararEscuta();
+      },
+      onFim: () => { pararEscuta(); },
+    });
+  }
+  coleta.reconhecedor.start();
+  coleta.ouvindo = true;
+  $('btn-mic').classList.add('ouvindo');
+  $('mic-status').textContent = 'Ouvindo... toque novamente para parar';
+});
+
+$('btn-pular-pergunta').addEventListener('click', () => avancarPergunta(true));
+$('btn-confirmar-pergunta').addEventListener('click', () => avancarPergunta(false));
+
+async function avancarPergunta(pular) {
+  pararEscuta();
+  const perguntas = coleta.session.perguntas;
+  const p = perguntas[coleta.indicePergunta];
+  const texto = $('transcricao-texto').value.trim();
+
+  try {
+    if (!pular) {
+      if (p.tipo === 'aberta') {
+        if (texto) await updateDoc(coleta.respondenteRef, { [`abertas.${p.id}`]: texto });
+      } else if (coleta.valorAtual !== null) {
+        await updateDoc(coleta.respondenteRef, { [`respostas.${p.id}`]: { valor: coleta.valorAtual, texto } });
+      }
+    }
+  } catch (e) {
+    toast('Sem conexão — a resposta não foi salva. Tente confirmar novamente.');
+    return;
+  }
+
+  coleta.indicePergunta++;
+  if (coleta.indicePergunta >= perguntas.length) {
+    try {
+      await updateDoc(coleta.respondenteRef, { finalizadoEm: serverTimestamp() });
+    } catch (e) {
+      toast('Sem conexão ao finalizar — tente novamente em instantes.');
+      coleta.indicePergunta--;
+      return;
+    }
+    toast(`Respondente ${coleta.seq} salvo. Iniciando o próximo.`);
+    coleta.seq++;
+    iniciarNovoRespondente();
+  } else {
+    mostrarPergunta();
+  }
+}
+
+// ---------- tela: relatório ----------
+let relatorioUnsub = null;
+let relatorioSession = null;
+let relatorioRespondentes = [];
+
+async function telaRelatorio(sessionId) {
+  mostrarTela('tela-relatorio');
+  if (relatorioUnsub) { relatorioUnsub(); relatorioUnsub = null; }
+
+  const sessRef = doc(db, 'sessions', sessionId);
+  let snap;
+  try {
+    snap = await getDoc(sessRef);
+  } catch (e) {
+    toast('Sem conexão com o Firebase. Verifique a internet e tente novamente.');
+    location.hash = '#/'; return;
+  }
+  if (!snap.exists()) { toast('Pesquisa não encontrada.'); location.hash = '#/'; return; }
+  relatorioSession = snap.data();
+  $('topbar-title').textContent = relatorioSession.clienteNome;
+  $('topbar-subtitle').textContent = 'Relatório em tempo real';
+  $('relatorio-titulo').textContent = `Relatório — ${relatorioSession.clienteNome}`;
+
+  const selFiltro = $('filtro-segmento');
+  selFiltro.innerHTML = '<option value="">Todos</option>' +
+    (relatorioSession.segmentos || []).map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  selFiltro.onchange = renderRelatorio;
+
+  const q = query(collection(db, 'sessions', sessionId, 'respondentes'), orderBy('seq'));
+  relatorioUnsub = onSnapshot(q, (qs) => {
+    relatorioRespondentes = [];
+    qs.forEach((d) => relatorioRespondentes.push(d.data()));
+    renderRelatorio();
+  });
+}
+
+$('btn-imprimir').addEventListener('click', () => window.print());
+
+function renderRelatorio() {
+  const filtro = $('filtro-segmento').value;
+  const respondentes = filtro ? relatorioRespondentes.filter((r) => r.segmento === filtro) : relatorioRespondentes;
+  $('resumo-total-respondentes').textContent = respondentes.length;
+
+  const cont = $('relatorio-perguntas');
+  cont.innerHTML = '';
+
+  (relatorioSession.perguntas || []).forEach((p) => {
+    const card = document.createElement('div');
+    card.className = 'card pergunta-relatorio-card';
+
+    if (p.tipo === 'aberta') {
+      const textos = respondentes
+        .map((r) => r.abertas && r.abertas[p.id])
+        .filter(Boolean);
+      card.innerHTML = `
+        <div class="pergunta-relatorio-topo">
+          <div class="pergunta-relatorio-titulo">${escapeHtml(p.texto)}</div>
+          <div class="pergunta-relatorio-media"><div class="media-numero">${textos.length}</div><div class="media-sub">respostas</div></div>
+        </div>
+      `;
+      const lista = document.createElement('div');
+      lista.className = 'comentarios-lista';
+      if (!textos.length) {
+        lista.innerHTML = '<div class="comentario-item">Ainda sem respostas.</div>';
+      } else {
+        respondentes.forEach((r) => {
+          const t = r.abertas && r.abertas[p.id];
+          if (!t) return;
+          const item = document.createElement('div');
+          item.className = 'comentario-item';
+          item.innerHTML = `<div class="comentario-autor">Respondente ${r.seq}${r.segmento ? ' · ' + escapeHtml(r.segmento) : ''}</div>${escapeHtml(t)}`;
+          lista.appendChild(item);
+        });
+      }
+      card.appendChild(lista);
+      cont.appendChild(card);
+      return;
+    }
+
+    const valores = respondentes
+      .map((r) => r.respostas && r.respostas[p.id])
+      .filter((v) => v && typeof v.valor === 'number');
+    const media = valores.length ? valores.reduce((a, v) => a + v.valor, 0) / valores.length : null;
+    const max = p.tipo === 'nota10' ? 10 : 5;
+
+    card.innerHTML = `
+      <div class="pergunta-relatorio-topo">
+        <div class="pergunta-relatorio-titulo">${escapeHtml(p.texto)}</div>
+        <div class="pergunta-relatorio-media">
+          <div class="media-numero">${media === null ? '—' : formatarNumero(media)}</div>
+          <div class="media-sub">média (${valores.length}) de ${max}</div>
+        </div>
+      </div>
+    `;
+
+    // distribuição
+    const contagem = {};
+    const inicio = p.tipo === 'nota10' ? 0 : 1;
+    for (let i = inicio; i <= max; i++) contagem[i] = 0;
+    valores.forEach((v) => { contagem[v.valor] = (contagem[v.valor] || 0) + 1; });
+    const maiorContagem = Math.max(1, ...Object.values(contagem));
+
+    const distDiv = document.createElement('div');
+    distDiv.className = 'dist-barras';
+    for (let i = max; i >= inicio; i--) {
+      const label = p.tipo === 'nota10' ? String(i) : NIVEIS[p.tipo][i - 1];
+      const qtd = contagem[i] || 0;
+      const linha = document.createElement('div');
+      linha.className = 'dist-linha';
+      linha.innerHTML = `
+        <span class="dist-label">${escapeHtml(label)}</span>
+        <span class="dist-barra-fundo"><span class="dist-barra-preench" style="width:${(qtd / maiorContagem) * 100}%"></span></span>
+        <span class="dist-count">${qtd}</span>
+      `;
+      distDiv.appendChild(linha);
+    }
+    card.appendChild(distDiv);
+
+    const comentarios = respondentes
+      .map((r) => ({ r, resp: r.respostas && r.respostas[p.id] }))
+      .filter((x) => x.resp && x.resp.texto);
+
+    if (comentarios.length) {
+      const toggle = document.createElement('button');
+      toggle.className = 'comentarios-toggle';
+      toggle.textContent = `Ver ${comentarios.length} comentário(s)`;
+      const lista = document.createElement('div');
+      lista.className = 'comentarios-lista hidden';
+      comentarios.forEach(({ r, resp }) => {
+        const item = document.createElement('div');
+        item.className = 'comentario-item';
+        item.innerHTML = `<div class="comentario-autor">Respondente ${r.seq}${r.segmento ? ' · ' + escapeHtml(r.segmento) : ''} — nota ${resp.valor}</div>${escapeHtml(resp.texto)}`;
+        lista.appendChild(item);
+      });
+      toggle.addEventListener('click', () => {
+        lista.classList.toggle('hidden');
+        toggle.textContent = lista.classList.contains('hidden') ? `Ver ${comentarios.length} comentário(s)` : 'Ocultar comentários';
+      });
+      card.appendChild(toggle);
+      card.appendChild(lista);
+    }
+
+    cont.appendChild(card);
+  });
+}
+
+// PWA
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pesquisa de Clima — Falcioni Consultoria</title>
+<meta name="theme-color" content="#1B3260">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-left">
+    <button id="btn-voltar" class="btn-icon" title="Voltar" hidden>←</button>
+    <div class="topbar-brand">
+      <div class="logo-placeholder" id="logo-placeholder">🏢</div>
+      <div>
+        <div class="topbar-title" id="topbar-title">Pesquisa de Clima</div>
+        <div class="topbar-subtitle" id="topbar-subtitle">Falcioni Consultoria</div>
+      </div>
+    </div>
+  </div>
+  <div class="topbar-right" id="topbar-right"></div>
+</header>
+
+<main id="app">
+
+  <!-- Aviso: configuração do Firebase pendente -->
+  <section id="tela-config-aviso" class="tela hidden">
+    <div class="card aviso">
+      <h2>Configuração pendente</h2>
+      <p>Edite o arquivo <code>firebase-config.js</code> com os dados do seu projeto Firebase antes de usar o app.
+      Veja o passo a passo no <code>README.md</code>.</p>
+    </div>
+  </section>
+
+  <!-- Lista de pesquisas -->
+  <section id="tela-lista" class="tela hidden">
+    <div class="tela-header">
+      <h1>Pesquisas</h1>
+      <button id="btn-nova-pesquisa" class="btn btn-primario">+ Nova pesquisa</button>
+    </div>
+    <div id="lista-pesquisas" class="lista-pesquisas"></div>
+    <p id="lista-vazia" class="texto-vazio hidden">Nenhuma pesquisa criada ainda. Toque em "Nova pesquisa" para começar.</p>
+  </section>
+
+  <!-- Nova pesquisa -->
+  <section id="tela-nova" class="tela hidden">
+    <h1>Nova pesquisa</h1>
+
+    <div class="card">
+      <label class="campo">
+        <span>Nome do cliente / empresa</span>
+        <input type="text" id="input-cliente" placeholder="Ex: Cariri Mix">
+      </label>
+
+      <div class="campo">
+        <span>Logo do cliente</span>
+        <div class="logo-espaco">Espaço reservado para a logo do cliente (adicionar depois)</div>
+      </div>
+
+      <label class="campo">
+        <span>Setores / segmentos para o relatório (separados por vírgula, opcional)</span>
+        <input type="text" id="input-segmentos" placeholder="Ex: Administrativo, Vendas, Operação">
+      </label>
+    </div>
+
+    <div class="card">
+      <span class="campo-titulo">Modelo de pesquisa</span>
+      <div class="modelo-opcoes">
+        <button class="modelo-opcao" data-modelo="nota10">
+          <strong>Nota 0 a 10</strong>
+          <span>10 perguntas padrão + 2 abertas</span>
+        </button>
+        <button class="modelo-opcao" data-modelo="likert">
+          <strong>Concordância / Satisfação</strong>
+          <span>10 perguntas padrão + 2 abertas</span>
+        </button>
+        <button class="modelo-opcao" data-modelo="vazio">
+          <strong>Personalizado</strong>
+          <span>Começar em branco</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="campo-titulo-linha">
+        <span class="campo-titulo">Perguntas</span>
+        <button id="btn-add-pergunta" class="btn btn-secundario btn-pequeno">+ Adicionar pergunta</button>
+      </div>
+      <div id="lista-perguntas-edit" class="lista-perguntas-edit"></div>
+    </div>
+
+    <button id="btn-criar-pesquisa" class="btn btn-primario btn-largo">Criar pesquisa e começar a coletar</button>
+  </section>
+
+  <!-- Coleta (captura por voz) -->
+  <section id="tela-coleta" class="tela hidden">
+
+    <div class="coleta-status">
+      <span id="coleta-respondente-label">Respondente 1</span>
+      <button id="btn-encerrar-pesquisa" class="btn-link">Encerrar pesquisa</button>
+    </div>
+
+    <div class="progresso-barra"><div id="progresso-fill" class="progresso-fill"></div></div>
+
+    <!-- Escolha de segmento -->
+    <div id="bloco-segmento" class="card hidden">
+      <h2>Setor / segmento do respondente</h2>
+      <p class="ajuda">Não identifica a pessoa — apenas para poder segmentar o relatório depois.</p>
+      <div id="chips-segmento" class="chips"></div>
+      <button id="btn-pular-segmento" class="btn btn-secundario">Continuar sem informar</button>
+    </div>
+
+    <!-- Pergunta atual -->
+    <div id="bloco-pergunta" class="card hidden">
+      <div class="pergunta-indice" id="pergunta-indice">Pergunta 1 de 12</div>
+      <div class="pergunta-tipo-badge" id="pergunta-tipo-badge">Nota 0 a 10</div>
+      <h2 id="pergunta-texto">Texto da pergunta</h2>
+
+      <div id="resposta-nota10" class="resposta-nota10 hidden"></div>
+      <div id="resposta-likert" class="resposta-likert hidden"></div>
+      <div id="resposta-aberta-aviso" class="ajuda hidden">Resposta livre — grave a fala do respondente abaixo.</div>
+
+      <div class="mic-area">
+        <button id="btn-mic" class="btn-mic" title="Ouvir resposta">🎤</button>
+        <span id="mic-status">Toque no microfone e deixe o cliente responder</span>
+      </div>
+
+      <label class="campo">
+        <span>Transcrição / comentário (editável)</span>
+        <textarea id="transcricao-texto" rows="3" placeholder="A fala transcrita aparece aqui..."></textarea>
+      </label>
+
+      <div id="voz-nao-suportada" class="aviso-inline hidden">
+        Reconhecimento de voz não é suportado neste navegador. Use os botões acima para registrar a resposta manualmente, ou abra este app no Chrome/Edge.
+      </div>
+
+      <div class="coleta-acoes">
+        <button id="btn-pular-pergunta" class="btn btn-secundario">Pular</button>
+        <button id="btn-confirmar-pergunta" class="btn btn-primario">Confirmar e próxima →</button>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- Relatório -->
+  <section id="tela-relatorio" class="tela hidden">
+    <div class="tela-header">
+      <h1 id="relatorio-titulo">Relatório</h1>
+      <button id="btn-imprimir" class="btn btn-secundario no-print">Imprimir / Salvar PDF</button>
+    </div>
+
+    <div class="relatorio-resumo card no-print">
+      <div>
+        <div class="resumo-numero" id="resumo-total-respondentes">0</div>
+        <div class="resumo-label">respondentes</div>
+      </div>
+      <label class="campo campo-filtro">
+        <span>Filtrar por segmento</span>
+        <select id="filtro-segmento"><option value="">Todos</option></select>
+      </label>
+    </div>
+
+    <div id="relatorio-perguntas" class="relatorio-perguntas"></div>
+  </section>
+
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
