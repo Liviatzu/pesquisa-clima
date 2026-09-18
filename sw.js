@@ -13,10 +13,18 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// network-first: GitHub Pages não permite header Cache-Control customizado,
+// então evitamos servir versão antiga do app preferindo sempre a rede quando disponível.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (event.request.url.includes('firestore.googleapis.com') || event.request.url.includes('gstatic.com')) return;
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request).catch(() => cached))
+    fetch(event.request)
+      .then((resp) => {
+        const copia = resp.clone();
+        caches.open(CACHE).then((cache) => cache.put(event.request, copia));
+        return resp;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
