@@ -32,15 +32,15 @@ service cloud.firestore {
 
 > Isso deixa o banco aberto (sem login) para simplificar o uso em campo — qualquer pessoa com o link do app consegue ler/escrever. Se quiser reforçar depois, dá pra adicionar autenticação por senha; me avise quando quiser isso.
 
-## 2. Publicar no Netlify
+## 2. Publicar (GitHub Pages)
 
-O código já está no GitHub em https://github.com/Liviatzu/pesquisa-clima (mesma conta do `falcion-sistema`).
+Tudo fica no GitHub, sem token de terceiro para renovar. Repositório: https://github.com/Liviatzu/pesquisa-clima
 
-1. No Netlify, **Add new site > Import an existing project > GitHub** e escolha o repositório `pesquisa-clima` (passo único, precisa ser feito manualmente uma vez pelo painel do Netlify).
-2. Build command: vazio. Publish directory: `.`.
-3. Depois disso, toda atualização é só `git push` — o Netlify redeploya sozinho, do mesmo jeito que o Falcion.
+O GitHub Pages já está ativado (branch `main`, pasta `/`). O app fica no ar em:
 
-O `netlify.toml` já está configurado.
+**https://liviatzu.github.io/pesquisa-clima/**
+
+Toda atualização é só `git push` — o GitHub publica sozinho em 1-2 minutos, sem nenhum passo manual.
 
 ## 3. Usar
 
