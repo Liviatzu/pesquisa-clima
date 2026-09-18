@@ -34,10 +34,11 @@ service cloud.firestore {
 
 ## 2. Publicar no Netlify
 
-O app é só HTML/JS estático, não precisa de build:
+O código já está no GitHub em https://github.com/Liviatzu/pesquisa-clima (mesma conta do `falcion-sistema`).
 
-1. Arraste a pasta `pesquisa-clima` para https://app.netlify.com/drop, **ou**
-2. Suba esta pasta num repositório Git e conecte no Netlify (build command vazio, publish directory `.`).
+1. No Netlify, **Add new site > Import an existing project > GitHub** e escolha o repositório `pesquisa-clima` (passo único, precisa ser feito manualmente uma vez pelo painel do Netlify).
+2. Build command: vazio. Publish directory: `.`.
+3. Depois disso, toda atualização é só `git push` — o Netlify redeploya sozinho, do mesmo jeito que o Falcion.
 
 O `netlify.toml` já está configurado.
 
