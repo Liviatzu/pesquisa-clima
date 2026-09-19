@@ -69,7 +69,7 @@ function rotear() {
 $('btn-nova-pesquisa').addEventListener('click', () => { location.hash = '#/nova'; });
 
 async function telaLista() {
-  $('topbar-title').textContent = 'Pesquisa de Clima';
+  $('topbar-title').textContent = 'Falclima';
   $('topbar-subtitle').textContent = 'Falcioni Consultoria';
   mostrarTela('tela-lista');
   const cont = $('lista-pesquisas');

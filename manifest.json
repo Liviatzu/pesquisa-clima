@@ -1,6 +1,6 @@
 {
-  "name": "Pesquisa de Clima — Falcioni Consultoria",
-  "short_name": "Pesquisa Clima",
+  "name": "Falclima — Falcioni Consultoria",
+  "short_name": "Falclima",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

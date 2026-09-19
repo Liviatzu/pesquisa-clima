@@ -1,4 +1,4 @@
-# Pesquisa de Clima — Falcioni Consultoria
+# Falclima — Falcioni Consultoria
 
 App para aplicar pesquisas de clima organizacional durante a entrevista com o cliente: o consultor lê a pergunta, o respondente fala a resposta, o microfone transcreve e sugere a nota/nível automaticamente, e o relatório (média por pergunta, comentários anônimos) vai sendo montado em tempo real conforme cada pessoa responde.
 
