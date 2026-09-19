@@ -1,13 +1,12 @@
-// 1. Crie um projeto em https://console.firebase.google.com (gratuito)
-// 2. Ative o Firestore Database (modo produção) em "Build > Firestore Database"
-// 3. Em "Configurações do projeto > Geral > Seus apps", crie um app Web e cole os dados aqui embaixo
-// 4. Em "Firestore Database > Regras", cole as regras sugeridas no README.md deste projeto
+// Mesmo projeto Firebase já usado pelo Falcioni KPIs (console.firebase.google.com/project/falcioni-kpis)
+// Coleções deste app (sessions / sessions/{id}/respondentes) não colidem com as do KPIs.
+// Regras de Firestore: adicionar o bloco sugerido no README.md às regras já existentes do projeto (sem substituir as demais).
 
 export const firebaseConfig = {
-  apiKey: 'COLE_AQUI',
-  authDomain: 'SEU-PROJETO.firebaseapp.com',
-  projectId: 'SEU-PROJETO',
-  storageBucket: 'SEU-PROJETO.appspot.com',
-  messagingSenderId: '000000000000',
-  appId: '1:000000000000:web:xxxxxxxxxxxxxxxxxxxxxxxx',
+  apiKey: 'AIzaSyA69Ql_K-_rOMjigupucmrIF_0L4Um2yxU',
+  authDomain: 'falcioni-kpis.firebaseapp.com',
+  projectId: 'falcioni-kpis',
+  storageBucket: 'falcioni-kpis.firebasestorage.app',
+  messagingSenderId: '254696088647',
+  appId: '1:254696088647:web:0a553808bce1b4faf4bd62',
 };
